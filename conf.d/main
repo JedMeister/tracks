@@ -1,54 +1,56 @@
-
-#!/bin/sh -ex
-
-SRC=/usr/local/src
-WEBROOT=/var/www/tracks
+#!/bin/bash -ex
 
 ADMIN_NAME=admin
 ADMIN_PASS=turnkey1
+DB_NAME=tracks
+DB_USER=tracks
+DB_PASS=$(mcookie)
+WEBROOT=/var/www/tracks
 
 # start mysql
 service mysql start
 
-# install tracks and configure it
-unzip $SRC/tracks-*.zip -d $(dirname $WEBROOT)
-rm $SRC/tracks-*.zip
-
-mv $WEBROOT $WEBROOT.orig
-mv $(dirname $WEBROOT)/tracks-* $WEBROOT
-cp $WEBROOT.orig/config/database.yml $WEBROOT/config/database.yml
-rm -rf $WEBROOT.orig
-
+# use default config template
 cp $WEBROOT/config/site.yml.tmpl $WEBROOT/config/site.yml
 
-rm $WEBROOT/.ruby-version
+# configure DB using db conf template
+cp $WEBROOT/config/database.yml.tmpl $WEBROOT/config/database.yml
+mysqladmin create $DB_NAME
+mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* to $DB_USER@localhost IDENTIFIED BY '$DB_PASS'; flush privileges;"
+sed -Ei "\|production| {n; :a; \|password:|! {N; ba;}; \
+    s|(password:).*|\1 $DB_PASS|; \
+    s|(^.*)# +(encoding:.*)|\1\2|; \
+    :b; n; $! bb} " \
+    $WEBROOT/config/database.yml
+sed -i "\|username: |s|:.*|: tracks|" $WEBROOT/config/database.yml
+sed -i '\|# encoding:|s|# ||' $WEBROOT/config/database.yml
 
 cd $WEBROOT
-[ "$FAB_HTTP_PROXY" ] && export HTTP_PROXY=$FAB_HTTP_PROXY
 
-# rails fixes
-echo >> Gemfile
-echo '# TKL: Fixes for old Rails with new Ruby causing issues' >> Gemfile
-echo gem "'psych', '< 4'" >> Gemfile
-echo gem "'net-smtp', require: false" >> Gemfile
-echo gem "'net-pop', require: false" >> Gemfile
+rm .ruby-version
 
-bundle --without=test install
+# fix broken dep - see https://github.com/TracksApp/tracks/blob/ruby31/Gemfile#L32
+sed -i "\|^gem 'therubyracer',|s|'therubyracer'|'mini_racer'|" Gemfile
+
+# install
+export RAILS_ENV=production
+bundle config set --local path 'vendor/bundle'
+bundle config set --local without 'test development postgresql sqlite'
 bundle update
-bundle exec rake db:migrate RAILS_ENV="production"
-unset HTTP_PROXY
+bundle exec rake db:migrate
 
 # configure permissions
 mkdir -p $WEBROOT/tmp/cache
 chown -R www-data:www-data $WEBROOT/tmp
-chown -R www-data:www-data $WEBROOT/log
+mkdir -p $WEBROOT/public/uploads/csv
+chown -R www-data:www-data $WEBROOT/public/uploads
+mkdir -p /var/log/tracks
+#chown -R www-data:www-data $WEBROOT/log
+chown -R www-data:www-data /var/log/tracks
 chmod 666 $WEBROOT/log/*
 
-mkdir -p $WEBROOT/public/uploads/csv/
-chown -R www-data:www-data $WEBROOT/public/uploads
-
 # precompile assets
-bundle exec rake assets:precompile RAILS_ENV=production
+bundle exec rake assets:precompile
 
 # turnkey-credit (passenger substitute x2 bug)
 cat >>$WEBROOT/app/assets/stylesheets/tracks.css.scss<<EOF
@@ -78,7 +80,6 @@ TOKEN=$( curl -c /tmp/cookies.txt -s http://localhost/signup \
         | grep -o 'value=".*"' \
         | grep -o '".*"' \
         | tr -d \" )
-
 curl -s -X POST -b /tmp/cookies.txt http://localhost/users \
         --data-urlencode "utf8=✓" \
         --data-urlencode "authenticity_token=${TOKEN}" \
@@ -86,10 +87,8 @@ curl -s -X POST -b /tmp/cookies.txt http://localhost/users \
         --data-urlencode "user%5Bpassword%5D=${ADMIN_PASS}" \
         --data-urlencode "user%5Bpassword_confirmation%5D=${ADMIN_PASS}"
 
-service apache2 stop
-
 rm -f /tmp/cookies.txt
 
-# stop mysql
-service mysql stop
-
+# stop mariadb & apache2
+service mariadb stop
+service apache2 stop

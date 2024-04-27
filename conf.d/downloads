@@ -1,12 +1,16 @@
 #!/bin/bash -ex
 
-dl() {
-    [ "$FAB_HTTP_PROXY" ] && PROXY="--proxy $FAB_HTTP_PROXY"
-    cd $2; curl -L -f -O $PROXY $1; cd -
-}
+[[ -z "$FAB_HTTP_PROXY" ]] || export http_proxy=$FAB_HTTP_PROXY
+[[ -z "$FAB_HTTPS_PROXY" ]] || export https_proxy=$FAB_HTTPS_PROXY
 
-VERSION="2.6.1"
+WEBROOT=/var/www/tracks
+REPO=TracksApp/tracks
 
-SRC="/usr/local/src"
-dl https://github.com/TracksApp/tracks/archive/v${VERSION}.zip $SRC
-mv $SRC/v${VERSION}.zip $SRC/tracks-${VERSION}.zip
+ls -la $(dirname $WEBROOT)
+ls -la $WEBROOT
+
+# following the lead of others, version release is quite dated & master
+# includes some sec updates - so installing from that...
+#VERSION=$(gh_releases $REPO | grep -vi "rc" | sort -V | tail -1)
+#git clone --depth=1 --branch=$VERSION https://github.com/$REPO.git $WEBROOT
+git clone --depth=1 https://github.com/$REPO.git $WEBROOT
