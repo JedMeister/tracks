@@ -6,11 +6,9 @@
 WEBROOT=/var/www/tracks
 REPO=TracksApp/tracks
 
-ls -la $(dirname $WEBROOT)
-ls -la $WEBROOT
+# nuke preconfigured tracks app (from common/conf/rails)
+rm -rf $WEBROOT
 
-# following the lead of others, version release is quite dated & master
-# includes some sec updates - so installing from that...
-#VERSION=$(gh_releases $REPO | grep -vi "rc" | sort -V | tail -1)
-#git clone --depth=1 --branch=$VERSION https://github.com/$REPO.git $WEBROOT
+# following the lead of others, versioned release is quite dated & master
+# includes some sec updates - so cloning from that.
 git clone --depth=1 https://github.com/$REPO.git $WEBROOT

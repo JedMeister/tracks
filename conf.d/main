@@ -2,6 +2,7 @@
 
 ADMIN_NAME=admin
 ADMIN_PASS=turnkey1
+# current tracks expects DB named 'tracks'
 DB_NAME=tracks
 DB_USER=tracks
 DB_PASS=$(mcookie)
@@ -13,20 +14,27 @@ service mysql start
 # use default config template
 cp $WEBROOT/config/site.yml.tmpl $WEBROOT/config/site.yml
 
-# configure DB using db conf template
-cp $WEBROOT/config/database.yml.tmpl $WEBROOT/config/database.yml
+# tracks default config uses DB 'tracks' so let's create that, the user and
+# remove DBs created by common/conf/rails
 mysqladmin create $DB_NAME
-mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* to $DB_USER@localhost IDENTIFIED BY '$DB_PASS'; flush privileges;"
-sed -Ei "\|production| {n; :a; \|password:|! {N; ba;}; \
-    s|(password:).*|\1 $DB_PASS|; \
-    s|(^.*)# +(encoding:.*)|\1\2|; \
-    :b; n; $! bb} " \
-    $WEBROOT/config/database.yml
-sed -i "\|username: |s|:.*|: tracks|" $WEBROOT/config/database.yml
-sed -i '\|# encoding:|s|# ||' $WEBROOT/config/database.yml
+mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* \
+          to $DB_USER@localhost IDENTIFIED BY '$DB_PASS'; \
+          flush privileges;"
+for db in development production test; do
+    mysqladmin --force drop ${DB_NAME}_$db
+done
+
+# configure db conf template
+mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* \
+          to $DB_USER@localhost IDENTIFIED BY '$DB_PASS'; \
+          flush privileges;"
+cp $WEBROOT/config/database.yml.tmpl $WEBROOT/config/database.yml
+sed -i "\|encoding: utf8|s|# *||; \
+        \|username: |s|:.*|: $DB_USER|; \
+        \|password:|s|:.*|: $DB_PASS|" \
+       $WEBROOT/config/database.yml
 
 cd $WEBROOT
-
 rm .ruby-version
 
 # fix broken dep - see https://github.com/TracksApp/tracks/blob/ruby31/Gemfile#L32
@@ -35,19 +43,23 @@ sed -i "\|^gem 'therubyracer',|s|'therubyracer'|'mini_racer'|" Gemfile
 # install
 export RAILS_ENV=production
 bundle config set --local path 'vendor/bundle'
-bundle config set --local without 'test development postgresql sqlite'
-bundle update
+bundle config set --local without 'development test postgresql sqlite'
+bundle update # probably should be 'install' but that is currently failing!?
 bundle exec rake db:migrate
 
-# configure permissions
-mkdir -p $WEBROOT/tmp/cache
-chown -R www-data:www-data $WEBROOT/tmp
-mkdir -p $WEBROOT/public/uploads/csv
-chown -R www-data:www-data $WEBROOT/public/uploads
-mkdir -p /var/log/tracks
-#chown -R www-data:www-data $WEBROOT/log
-chown -R www-data:www-data /var/log/tracks
-chmod 666 $WEBROOT/log/*
+# configure file structure & permissions
+rm -f $WEBROOT/log/*
+mkdir -p $WEBROOT/tmp/cache \
+         $WEBROOT/public/uploads/csv \
+         $WEBROOT/log \
+         /var/log/tracks
+mv $WEBROOT/log/* /var/log/tracks/
+ln -s /var/log/tracks $WEBROOT/log
+chown -R www-data:www-data $WEBROOT/tmp \
+                           $WEBROOT/public/uploads \
+                           $WEBROOT/log \
+                           /var/log/tracks
+chmod 666 /var/log/tracks/*
 
 # precompile assets
 bundle exec rake assets:precompile
